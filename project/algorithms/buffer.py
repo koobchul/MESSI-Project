@@ -1,44 +1,28 @@
+#buffer.py
+
 from typing import NamedTuple, Sequence
 
 import jax
 import jax.numpy as jnp
 
-
 class Transition(NamedTuple):
     """
     One MAPPO rollout transition.
 
-    Shapes for 5v5 controlled Team 0:
-
-    actor_obs:
-        [5, 414]
-
-    critic_obs:
-        [411]
-
-    intent:
-        [5]
-
-    pre_tanh_continuous:
-        [5, 7]
-
-    log_prob:
-        [5]
-
-    value:
-        scalar
-
     reward:
-        scalar
+        Reward actually used by GAE / PPO.
 
-    terminated:
-        scalar bool
+        reward
+        =
+        base_reward
+        +
+        shaping_reward
 
-    truncated:
-        scalar bool
+    base_reward:
+        Original sparse MESSI goal reward.
 
-    done:
-        scalar bool
+    shaping_reward:
+        Potential-based dense shaping component.
     """
 
     actor_obs: jax.Array
@@ -56,6 +40,12 @@ class Transition(NamedTuple):
     truncated: jax.Array
     done: jax.Array
 
+    # Diagnostic fields.
+    #
+    # Defaults preserve compatibility with older code that constructs
+    # Transition without explicitly providing these fields.
+    base_reward: jax.Array = 0.0
+    shaping_reward: jax.Array = 0.0
 
 def stack_transitions(
     transitions: Sequence[Transition],

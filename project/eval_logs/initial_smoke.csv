@@ -1,0 +1,2 @@
+match,reset_seed,steps,return,goals_for,goals_against,goal_difference,result,wall_seconds
+1,1000,66000,-39.0,0,39,-39,L,680.7486938815564
