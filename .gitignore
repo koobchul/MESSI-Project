@@ -9,3 +9,5 @@ output/
 calib/artifacts/
 .jax_cache/
 .validation_tests/
+
+.vscode/
