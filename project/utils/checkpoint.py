@@ -20,6 +20,8 @@ def save_checkpoint(
     episode,
     episode_steps,
     episode_return,
+    retouch_guard_enabled=False,
+    training_config=None,
 ):
     """
     Save the complete MAPPO training state required for an exact
@@ -31,6 +33,8 @@ def save_checkpoint(
 
     checkpoint = {
         "version": CHECKPOINT_VERSION,
+        "retouch_guard_enabled": bool(retouch_guard_enabled),
+        "training_config": dict(training_config or {}),
 
         "actor_params": jax.device_get(
             actor_params

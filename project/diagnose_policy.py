@@ -1,3 +1,5 @@
+#diagnose_policy.py
+
 import argparse
 
 import jax
@@ -58,6 +60,68 @@ CONTINUOUS_NAMES = [
     "spin_x",
     "spin_y",
 ]
+
+
+# ================================================================
+# Continuous dimensions that are most behaviorally relevant
+# for each sampled intent.
+#
+# MOVE:
+#     locomotion vector
+#
+# Non-MOVE intents:
+#     contact-related continuous controls
+#
+# This mapping is used ONLY for readable diagnostics.
+# It does not change the policy, action, or environment.
+# ================================================================
+
+RELEVANT_CONTINUOUS_BY_INTENT = {
+    "MOVE": [
+        0,  # move_x
+        1,  # move_y
+    ],
+
+    "CONTROL": [
+        2,  # force_ball_x
+        3,  # force_ball_y
+        4,  # launch
+        5,  # spin_x
+        6,  # spin_y
+    ],
+
+    "PASS": [
+        2,
+        3,
+        4,
+        5,
+        6,
+    ],
+
+    "SHOT": [
+        2,
+        3,
+        4,
+        5,
+        6,
+    ],
+
+    "CLEAR": [
+        2,
+        3,
+        4,
+        5,
+        6,
+    ],
+
+    "CHALLENGE": [
+        2,
+        3,
+        4,
+        5,
+        6,
+    ],
+}
 
 
 def parse_args():
@@ -177,6 +241,282 @@ def initialize_models(
         actor_params,
         critic_params,
     )
+
+
+def compute_continuous_statistics(
+    policy_means,
+    policy_stds,
+    sampled_actions,
+):
+    """
+    Compute continuous-action statistics for a selected collection
+    of actor samples.
+
+    Inputs
+    ------
+    policy_means:
+        [N, 7]
+
+    policy_stds:
+        [N, 7]
+
+    sampled_actions:
+        [N, 7]
+        Post-tanh actions in [-1, 1].
+    """
+
+    mean_policy_mean = np.mean(
+        policy_means,
+        axis=0,
+    )
+
+    mean_abs_policy_mean = np.mean(
+        np.abs(
+            policy_means
+        ),
+        axis=0,
+    )
+
+    mean_policy_std = np.mean(
+        policy_stds,
+        axis=0,
+    )
+
+    actual_mean = np.mean(
+        sampled_actions,
+        axis=0,
+    )
+
+    actual_abs_mean = np.mean(
+        np.abs(
+            sampled_actions
+        ),
+        axis=0,
+    )
+
+    actual_std = np.std(
+        sampled_actions,
+        axis=0,
+    )
+
+    saturation_rate = np.mean(
+        np.abs(
+            sampled_actions
+        ) > 0.95,
+        axis=0,
+    )
+
+    policy_mean_saturation = np.mean(
+        np.abs(
+            np.tanh(
+                policy_means
+            )
+        ) > 0.95,
+        axis=0,
+    )
+
+    return {
+        "mean_policy_mean":
+            mean_policy_mean,
+
+        "mean_abs_policy_mean":
+            mean_abs_policy_mean,
+
+        "mean_policy_std":
+            mean_policy_std,
+
+        "actual_mean":
+            actual_mean,
+
+        "actual_abs_mean":
+            actual_abs_mean,
+
+        "actual_std":
+            actual_std,
+
+        "saturation_rate":
+            saturation_rate,
+
+        "policy_mean_saturation":
+            policy_mean_saturation,
+    }
+
+
+def compute_intent_conditioned_statistics(
+    sampled_intents,
+    policy_means,
+    policy_stds,
+    sampled_actions,
+):
+    """
+    Compute continuous-action statistics conditioned on the
+    sampled discrete intent.
+
+    Example
+    -------
+    PASS statistics contain only samples where:
+
+        sampled_intent == PASS
+
+    This prevents continuous outputs from unrelated intents from
+    being mixed into one global average.
+    """
+
+    result = {}
+
+    total_samples = len(
+        sampled_intents
+    )
+
+    for intent_index, intent_name in enumerate(
+        INTENT_NAMES
+    ):
+        mask = (
+            sampled_intents
+            == intent_index
+        )
+
+        count = int(
+            np.sum(
+                mask
+            )
+        )
+
+        if count == 0:
+            result[intent_name] = {
+                "count": 0,
+                "frequency": 0.0,
+                "stats": None,
+            }
+
+            continue
+
+        stats = compute_continuous_statistics(
+            policy_means=policy_means[
+                mask
+            ],
+
+            policy_stds=policy_stds[
+                mask
+            ],
+
+            sampled_actions=sampled_actions[
+                mask
+            ],
+        )
+
+        result[intent_name] = {
+            "count":
+                count,
+
+            "frequency":
+                count / total_samples,
+
+            "stats":
+                stats,
+        }
+
+    return result
+
+
+def print_continuous_table(
+    stats,
+    dimensions=None,
+):
+    """
+    Print one continuous-action statistics table.
+
+    dimensions:
+        Optional list of dimension indices.
+        If omitted, print all seven dimensions.
+    """
+
+    if dimensions is None:
+        dimensions = list(
+            range(
+                len(
+                    CONTINUOUS_NAMES
+                )
+            )
+        )
+
+    header = (
+        f"{'Dimension':<15}"
+        f"{'Mean(mu)':>11}"
+        f"{'|mu|':>10}"
+        f"{'Std(pi)':>10}"
+        f"{'ActMean':>10}"
+        f"{'|Act|':>10}"
+        f"{'ActStd':>10}"
+        f"{'Sat>0.95':>11}"
+        f"{'MuSat':>9}"
+    )
+
+    print(
+        header
+    )
+
+    for index in dimensions:
+        name = CONTINUOUS_NAMES[
+            index
+        ]
+
+        print(
+            f"{name:<15}"
+            f"{stats['mean_policy_mean'][index]:>11.4f}"
+            f"{stats['mean_abs_policy_mean'][index]:>10.4f}"
+            f"{stats['mean_policy_std'][index]:>10.4f}"
+            f"{stats['actual_mean'][index]:>10.4f}"
+            f"{stats['actual_abs_mean'][index]:>10.4f}"
+            f"{stats['actual_std'][index]:>10.4f}"
+            f"{100.0 * stats['saturation_rate'][index]:>10.2f}%"
+            f"{100.0 * stats['policy_mean_saturation'][index]:>8.2f}%"
+        )
+
+
+def print_intent_conditioned_diagnostics(
+    intent_conditioned,
+):
+    """
+    Print continuous statistics separately for each sampled intent.
+    """
+
+    print(
+        "\n--- Intent-Conditioned Continuous Diagnostics ---"
+    )
+
+    for intent_name in INTENT_NAMES:
+        item = intent_conditioned[
+            intent_name
+        ]
+
+        print(
+            "\n"
+            f"[{intent_name}]"
+            f" samples={item['count']}"
+            f""
+            f" ({100.0 * item['frequency']:.2f}%)"
+        )
+
+        if item[
+            "stats"
+        ] is None:
+            print(
+                "No samples."
+            )
+
+            continue
+
+        relevant_dimensions = (
+            RELEVANT_CONTINUOUS_BY_INTENT[
+                intent_name
+            ]
+        )
+
+        print_continuous_table(
+            item["stats"],
+            dimensions=relevant_dimensions,
+        )
 
 
 def evaluate_policy_behavior(
@@ -377,22 +717,32 @@ def evaluate_policy_behavior(
         # --------------------------------------------------------
         # Keep real transitions only
         #
-        # valid shape:
+        # valid:
         #     [T]
         #
         # actor quantities:
         #     [T, 5, ...]
         # --------------------------------------------------------
 
-        intents = intents[valid]
+        intents = intents[
+            valid
+        ]
 
-        pre_tanh = pre_tanh[valid]
+        pre_tanh = pre_tanh[
+            valid
+        ]
 
-        logits = logits[valid]
+        logits = logits[
+            valid
+        ]
 
-        means = means[valid]
+        means = means[
+            valid
+        ]
 
-        log_stds = log_stds[valid]
+        log_stds = log_stds[
+            valid
+        ]
 
         # --------------------------------------------------------
         # Policy intent probabilities
@@ -445,7 +795,9 @@ def evaluate_policy_behavior(
         # --------------------------------------------------------
 
         sampled_intents.append(
-            intents.reshape(-1)
+            intents.reshape(
+                -1
+            )
         )
 
         policy_probs.append(
@@ -491,6 +843,10 @@ def evaluate_policy_behavior(
 
         # --------------------------------------------------------
         # Reward
+        #
+        # The diagnostic collector uses its default shaping
+        # coefficient of 0.0. Therefore this return remains the
+        # original sparse MESSI evaluation return.
         # --------------------------------------------------------
 
         chunk_return = float(
@@ -603,57 +959,28 @@ def evaluate_policy_behavior(
     )
 
     # ============================================================
-    # Continuous statistics
+    # Overall continuous statistics
     # ============================================================
 
-    mean_policy_mean = np.mean(
-        policy_means,
-        axis=0,
+    continuous_stats = (
+        compute_continuous_statistics(
+            policy_means=policy_means,
+            policy_stds=policy_stds,
+            sampled_actions=sampled_actions,
+        )
     )
 
-    mean_abs_policy_mean = np.mean(
-        np.abs(
-            policy_means
-        ),
-        axis=0,
-    )
+    # ============================================================
+    # Intent-conditioned continuous statistics
+    # ============================================================
 
-    mean_policy_std = np.mean(
-        policy_stds,
-        axis=0,
-    )
-
-    actual_mean = np.mean(
-        sampled_actions,
-        axis=0,
-    )
-
-    actual_abs_mean = np.mean(
-        np.abs(
-            sampled_actions
-        ),
-        axis=0,
-    )
-
-    actual_std = np.std(
-        sampled_actions,
-        axis=0,
-    )
-
-    saturation_rate = np.mean(
-        np.abs(
-            sampled_actions
-        ) > 0.95,
-        axis=0,
-    )
-
-    policy_mean_saturation = np.mean(
-        np.abs(
-            np.tanh(
-                policy_means
-            )
-        ) > 0.95,
-        axis=0,
+    intent_conditioned = (
+        compute_intent_conditioned_statistics(
+            sampled_intents=sampled_intents,
+            policy_means=policy_means,
+            policy_stds=policy_stds,
+            sampled_actions=sampled_actions,
+        )
     )
 
     # ============================================================
@@ -676,6 +1003,10 @@ def evaluate_policy_behavior(
             sampled_intents
         ),
     )
+
+    # ============================================================
+    # Intent distribution
+    # ============================================================
 
     print(
         "\n--- Intent Distribution ---"
@@ -701,50 +1032,43 @@ def evaluate_policy_behavior(
         f"{np.mean(categorical_entropies):.4f}",
     )
 
-    print(
-        "\n--- Continuous Action Diagnostics ---"
-    )
-
-    header = (
-        f"{'Dimension':<15}"
-        f"{'Mean(mu)':>11}"
-        f"{'|mu|':>10}"
-        f"{'Std(pi)':>10}"
-        f"{'ActMean':>10}"
-        f"{'|Act|':>10}"
-        f"{'ActStd':>10}"
-        f"{'Sat>0.95':>11}"
-        f"{'MuSat':>9}"
-    )
+    # ============================================================
+    # Overall continuous diagnostics
+    # ============================================================
 
     print(
-        header
+        "\n--- Overall Continuous Action Diagnostics ---"
     )
 
-    for index, name in enumerate(
-        CONTINUOUS_NAMES
-    ):
-        print(
-            f"{name:<15}"
-            f"{mean_policy_mean[index]:>11.4f}"
-            f"{mean_abs_policy_mean[index]:>10.4f}"
-            f"{mean_policy_std[index]:>10.4f}"
-            f"{actual_mean[index]:>10.4f}"
-            f"{actual_abs_mean[index]:>10.4f}"
-            f"{actual_std[index]:>10.4f}"
-            f"{100.0 * saturation_rate[index]:>10.2f}%"
-            f"{100.0 * policy_mean_saturation[index]:>8.2f}%"
-        )
+    print_continuous_table(
+        continuous_stats
+    )
 
     print(
         "\nOverall actual-action saturation (>0.95):",
-        f"{100.0 * np.mean(saturation_rate):.2f}%",
+        (
+            f"{100.0 * np.mean(continuous_stats['saturation_rate']):.2f}%"
+        ),
     )
 
     print(
         "Overall policy-mean saturation:",
-        f"{100.0 * np.mean(policy_mean_saturation):.2f}%",
+        (
+            f"{100.0 * np.mean(continuous_stats['policy_mean_saturation']):.2f}%"
+        ),
     )
+
+    # ============================================================
+    # Intent-conditioned diagnostics
+    # ============================================================
+
+    print_intent_conditioned_diagnostics(
+        intent_conditioned
+    )
+
+    # ============================================================
+    # Return diagnostics
+    # ============================================================
 
     return {
         "score":
@@ -765,29 +1089,187 @@ def evaluate_policy_behavior(
             ),
 
         "mean_policy_mean":
-            mean_policy_mean,
+            continuous_stats[
+                "mean_policy_mean"
+            ],
 
         "mean_abs_policy_mean":
-            mean_abs_policy_mean,
+            continuous_stats[
+                "mean_abs_policy_mean"
+            ],
 
         "mean_policy_std":
-            mean_policy_std,
+            continuous_stats[
+                "mean_policy_std"
+            ],
 
         "actual_mean":
-            actual_mean,
+            continuous_stats[
+                "actual_mean"
+            ],
 
         "actual_abs_mean":
-            actual_abs_mean,
+            continuous_stats[
+                "actual_abs_mean"
+            ],
 
         "actual_std":
-            actual_std,
+            continuous_stats[
+                "actual_std"
+            ],
 
         "saturation_rate":
-            saturation_rate,
+            continuous_stats[
+                "saturation_rate"
+            ],
 
         "policy_mean_saturation":
-            policy_mean_saturation,
+            continuous_stats[
+                "policy_mean_saturation"
+            ],
+
+        "intent_conditioned":
+            intent_conditioned,
     }
+
+
+def print_intent_conditioned_comparison(
+    initial,
+    trained,
+):
+    """
+    Directly compare continuous behavior within each sampled intent.
+
+    This is the key diagnostic for determining whether large global
+    continuous-action drift is occurring inside behaviorally relevant
+    intent classes or merely in unrelated output dimensions.
+    """
+
+    print(
+        "\n--- Intent-Conditioned Continuous Change ---"
+    )
+
+    for intent_name in INTENT_NAMES:
+        initial_item = initial[
+            "intent_conditioned"
+        ][
+            intent_name
+        ]
+
+        trained_item = trained[
+            "intent_conditioned"
+        ][
+            intent_name
+        ]
+
+        print(
+            "\n"
+            f"[{intent_name}]"
+            f" initial_n={initial_item['count']}"
+            f""
+            f" | trained_n={trained_item['count']}"
+        )
+
+        if (
+            initial_item["stats"] is None
+            or trained_item["stats"] is None
+        ):
+            print(
+                "Insufficient samples."
+            )
+
+            continue
+
+        initial_stats = initial_item[
+            "stats"
+        ]
+
+        trained_stats = trained_item[
+            "stats"
+        ]
+
+        print(
+            f"{'Dimension':<15}"
+            f"{'InitMu':>9}"
+            f"{'TrainMu':>9}"
+            f"{'dMu':>9}"
+            f"{'InitAct':>10}"
+            f"{'TrainAct':>10}"
+            f"{'dAct':>9}"
+            f"{'InitSat':>10}"
+            f"{'TrainSat':>10}"
+        )
+
+        relevant_dimensions = (
+            RELEVANT_CONTINUOUS_BY_INTENT[
+                intent_name
+            ]
+        )
+
+        for dimension_index in relevant_dimensions:
+            dimension_name = (
+                CONTINUOUS_NAMES[
+                    dimension_index
+                ]
+            )
+
+            initial_mu = (
+                initial_stats[
+                    "mean_policy_mean"
+                ][dimension_index]
+            )
+
+            trained_mu = (
+                trained_stats[
+                    "mean_policy_mean"
+                ][dimension_index]
+            )
+
+            delta_mu = (
+                trained_mu
+                - initial_mu
+            )
+
+            initial_action = (
+                initial_stats[
+                    "actual_mean"
+                ][dimension_index]
+            )
+
+            trained_action = (
+                trained_stats[
+                    "actual_mean"
+                ][dimension_index]
+            )
+
+            delta_action = (
+                trained_action
+                - initial_action
+            )
+
+            initial_saturation = (
+                initial_stats[
+                    "saturation_rate"
+                ][dimension_index]
+            )
+
+            trained_saturation = (
+                trained_stats[
+                    "saturation_rate"
+                ][dimension_index]
+            )
+
+            print(
+                f"{dimension_name:<15}"
+                f"{initial_mu:>9.4f}"
+                f"{trained_mu:>9.4f}"
+                f"{delta_mu:>+9.4f}"
+                f"{initial_action:>10.4f}"
+                f"{trained_action:>10.4f}"
+                f"{delta_action:>+9.4f}"
+                f"{100.0 * initial_saturation:>9.2f}%"
+                f"{100.0 * trained_saturation:>9.2f}%"
+            )
 
 
 def print_comparison(
@@ -806,14 +1288,18 @@ def print_comparison(
         "========================================"
     )
 
+    # ============================================================
+    # Intent frequency comparison
+    # ============================================================
+
     print(
-        "\n--- Intent frequency change ---"
+        "\n--- Intent Frequency Change ---"
     )
 
     print(
         f"{'Intent':<12}"
         f"{'Initial %':>12}"
-        f"{'16K %':>12}"
+        f"{'Trained %':>12}"
         f"{'Change':>12}"
     )
 
@@ -846,6 +1332,10 @@ def print_comparison(
             f"{change:>+11.2f}"
         )
 
+    # ============================================================
+    # Entropy
+    # ============================================================
+
     print(
         "\nCategorical entropy:"
     )
@@ -856,9 +1346,13 @@ def print_comparison(
     )
 
     print(
-        "  16K:",
+        "  trained:",
         f"{trained['categorical_entropy']:.4f}",
     )
+
+    # ============================================================
+    # Overall saturation
+    # ============================================================
 
     print(
         "\nOverall action saturation:"
@@ -866,12 +1360,16 @@ def print_comparison(
 
     print(
         "  initial:",
-        f"{100.0 * np.mean(initial['saturation_rate']):.2f}%",
+        (
+            f"{100.0 * np.mean(initial['saturation_rate']):.2f}%"
+        ),
     )
 
     print(
-        "  16K:",
-        f"{100.0 * np.mean(trained['saturation_rate']):.2f}%",
+        "  trained:",
+        (
+            f"{100.0 * np.mean(trained['saturation_rate']):.2f}%"
+        ),
     )
 
     print(
@@ -886,10 +1384,19 @@ def print_comparison(
     )
 
     print(
-        "  16K:",
+        "  trained:",
         (
             f"{100.0 * np.mean(trained['policy_mean_saturation']):.2f}%"
         ),
+    )
+
+    # ============================================================
+    # Intent-conditioned comparison
+    # ============================================================
+
+    print_intent_conditioned_comparison(
+        initial,
+        trained,
     )
 
 
@@ -945,8 +1452,28 @@ def main():
         ]
     )
 
+    checkpoint_steps = checkpoint.get(
+        "total_env_steps",
+        None,
+    )
+
+    if checkpoint_steps is None:
+        trained_label = (
+            "TRAINED MLP"
+        )
+
+    else:
+        trained_label = (
+            f"MLP @ {int(checkpoint_steps)} steps"
+        )
+
     # ============================================================
     # Same collector for both policies
+    #
+    # No shaping coefficient is supplied here.
+    # Therefore the collector uses its default coefficient=0.0.
+    # The diagnostic score/return is consequently evaluated using
+    # the original sparse MESSI goal reward for both policies.
     # ============================================================
 
     controlled_indices = jnp.array(
@@ -1003,7 +1530,7 @@ def main():
     # ============================================================
 
     trained_result = evaluate_policy_behavior(
-        label="MLP @ 16K",
+        label=trained_label,
 
         env=env,
 

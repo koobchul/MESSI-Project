@@ -1,3 +1,5 @@
+from project.models.intent_guard import apply_retouch_guard
+
 from typing import NamedTuple
 
 import jax
@@ -38,6 +40,7 @@ def actor_loss_with_params(
     clip_eps=0.2,
     entropy_coef=0.01,
     valid_mask=None,
+    retouch_guard_enabled=False,
 ):
     """
     Re-evaluate stored rollout actions using the current actor.
@@ -92,6 +95,10 @@ def actor_loss_with_params(
                 actor_params["head"]
         },
         latent,
+    )
+
+    actor_output = apply_retouch_guard(
+        actor_output, actor_obs, enabled=retouch_guard_enabled,
     )
 
     # ============================================================
@@ -239,6 +246,7 @@ def ppo_update_step(
     # ============================================================
     def actor_loss_fn(params):
         return actor_loss_with_params(
+            retouch_guard_enabled=batch.retouch_guard_enabled,
             actor_params=params,
 
             backbone=backbone,
@@ -349,6 +357,7 @@ def ppo_update_step(
         _,
         post_actor_metrics,
     ) = actor_loss_with_params(
+        retouch_guard_enabled=batch.retouch_guard_enabled,
         actor_params=new_actor_params,
 
         backbone=backbone,

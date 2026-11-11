@@ -1,3 +1,5 @@
+from project.models.intent_guard import apply_retouch_guard
+
 from typing import NamedTuple
 
 import jax
@@ -109,6 +111,7 @@ def collect_rollout(
     rollout_length,
     key,
     controlled_team=0,
+    retouch_guard_enabled=True,
 ):
     """
     Collect one MAPPO rollout chunk from MESSI.
@@ -208,6 +211,10 @@ def collect_rollout(
             latent,
         )
 
+        actor_output = apply_retouch_guard(
+            actor_output, mlp_obs, enabled=retouch_guard_enabled,
+        )
+
         step_actor_key = jax.random.fold_in(
             actor_key,
             t,
@@ -303,6 +310,7 @@ def collect_rollout(
         # centralized team-level quantities
         # --------------------------------------------------------
         transition = Transition(
+            retouch_guard_enabled=jnp.bool_(retouch_guard_enabled),
             actor_obs=mlp_obs[
                 controlled_mask
             ],

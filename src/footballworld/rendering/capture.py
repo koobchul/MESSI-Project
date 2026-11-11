@@ -1768,6 +1768,7 @@ def render_event_match(
                 every=every,
                 chunk_frames=chunk_frames,
                 scheduler=scheduler,
+                render_video=True,
                 control_fps=control_fps,
                 match_index=match_index,
                 env=env,

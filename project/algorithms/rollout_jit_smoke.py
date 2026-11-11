@@ -1,3 +1,5 @@
+from project.models.intent_guard import apply_retouch_guard
+
 import jax
 import jax.numpy as jnp
 
@@ -37,6 +39,7 @@ def make_jitted_rollout_collector(
     rollout_length,
     controlled_indices,
     controlled_team=0,
+    retouch_guard_enabled=True,
 ):
     """
     Build a fixed-length JIT + lax.scan rollout collector.
@@ -215,6 +218,10 @@ def make_jitted_rollout_collector(
                 latent,
             )
 
+            actor_output = apply_retouch_guard(
+                actor_output, mlp_obs, enabled=retouch_guard_enabled,
+            )
+
             # ====================================================
             # 4-3. Sample learned actions
             # ====================================================
@@ -352,6 +359,7 @@ def make_jitted_rollout_collector(
             # ====================================================
 
             transition = Transition(
+                retouch_guard_enabled=jnp.bool_(retouch_guard_enabled),
                 actor_obs=(
                     controlled_actor_obs
                 ),

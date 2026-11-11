@@ -47,6 +47,12 @@ class Transition(NamedTuple):
     base_reward: jax.Array = 0.0
     shaping_reward: jax.Array = 0.0
 
+    # Reconstruct the rollout distribution exactly in PPO. Old batches are unguarded.
+    retouch_guard_enabled: jax.Array = False
+    approach_shaping_reward: jax.Array = 0.0
+    possession_shaping_reward: jax.Array = 0.0
+    lawful_possession: jax.Array = 0.0
+
 def stack_transitions(
     transitions: Sequence[Transition],
 ) -> Transition:

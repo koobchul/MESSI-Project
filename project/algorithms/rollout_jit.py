@@ -1,3 +1,6 @@
+from project.envs.reward_v3 import extra_control_shaping, control_potentials
+from project.models.intent_guard import apply_retouch_guard
+
 #rollout_jit.py
 
 from typing import NamedTuple
@@ -103,6 +106,11 @@ def make_jitted_rollout_collector(
     controlled_team=0,
     reward_shaping_coefficient=0.0,
     reward_gamma=0.99,
+    retouch_guard_enabled=True,
+    reward_version="v2",
+    approach_coefficient=.05,
+    possession_coefficient=.05,
+    approach_distance_scale_m=10.,
 ):
     """
     Build a fixed-length terminal-safe MAPPO rollout collector.
@@ -151,6 +159,11 @@ def make_jitted_rollout_collector(
     new_carry:
         Persistent state for the next rollout chunk.
     """
+    if reward_version not in ("v2", "v3"):
+        raise ValueError("reward_version must be v2 or v3")
+    if approach_coefficient < 0 or possession_coefficient < 0 or approach_distance_scale_m <= 0:
+        raise ValueError("Control coefficients must be nonnegative and distance scale positive")
+
 
     # ============================================================
     # 1. Static objects
@@ -252,6 +265,10 @@ def make_jitted_rollout_collector(
                 )
 
                 zero_transition = Transition(
+                    retouch_guard_enabled=jnp.bool_(False),
+                    approach_shaping_reward=jnp.float32(0.),
+                    possession_shaping_reward=jnp.float32(0.),
+                    lawful_possession=jnp.float32(0.),
                     actor_obs=jnp.zeros_like(
                         controlled_actor_obs
                     ),
@@ -385,6 +402,10 @@ def make_jitted_rollout_collector(
                     latent,
                 )
 
+                actor_output = apply_retouch_guard(
+                    actor_output, mlp_obs, enabled=retouch_guard_enabled,
+                )
+
                 sampled = sample_action(
                     actor_output,
                     step_actor_key,
@@ -512,6 +533,25 @@ def make_jitted_rollout_collector(
                     ),
                 )
 
+                approach_shaping = jnp.float32(0.)
+                possession_shaping = jnp.float32(0.)
+                lawful_possession = control_potentials(
+                    rollout.state, controlled_team, approach_distance_scale_m,
+                    env.ball, env.reach, env.action_scale,
+                ).possession
+                if reward_version == "v3":
+                    approach_shaping, possession_shaping = extra_control_shaping(
+                        rollout.state, result.rollout.state, result.terminated,
+                        base_reward, reward_gamma, approach_coefficient,
+                        possession_coefficient, controlled_team,
+                        approach_distance_scale_m, env.ball, env.reach, env.action_scale,
+                    )
+                    extra_reward = approach_shaping + possession_shaping
+                    reward_components = reward_components._replace(
+                        shaping_reward=reward_components.shaping_reward + extra_reward,
+                        total_reward=reward_components.total_reward + extra_reward,
+                    )
+
                 # =================================================
                 # Learning-team actor rows
                 # =================================================
@@ -556,6 +596,10 @@ def make_jitted_rollout_collector(
                 # =================================================
 
                 transition = Transition(
+                    retouch_guard_enabled=jnp.bool_(retouch_guard_enabled),
+                    approach_shaping_reward=approach_shaping,
+                    possession_shaping_reward=possession_shaping,
+                    lawful_possession=lawful_possession,
                     actor_obs=(
                         controlled_actor_obs
                     ),
