@@ -1,0 +1,5 @@
+seed,guard,checkpoint,valid_steps,team_possession_ticks,opponent_possession_ticks,retouch_team0,retouch_team1,control_traps_team0,control_traps_with_same_substep_retouch_team0,guard_context_agent_ticks,nonmove_requests_in_guard_context,dead_ball_ticks,restart_opened_frames,goals_for,goals_against,team_possession_pct,terminated,truncated,external_cutoff
+1000,OFF,project/checkpoints/mlp_mappo_shaped_v2_c0p05_seed_0_step_8192.pkl,6400,1,2063,4,0,2,1,408,310,1816,27,0,0,0.015625,False,False,True
+1000,ON,project/checkpoints/mlp_mappo_shaped_v2_c0p05_seed_0_step_8192.pkl,6400,0,2490,1,0,0,0,442,0,1273,16,0,2,0.0,False,False,True
+1002,OFF,project/checkpoints/mlp_mappo_shaped_v2_c0p05_seed_0_step_8192.pkl,6400,0,2315,6,0,2,2,379,308,1910,24,0,0,0.0,False,False,True
+1002,ON,project/checkpoints/mlp_mappo_shaped_v2_c0p05_seed_0_step_8192.pkl,6400,0,2113,3,0,0,0,399,0,1798,21,0,0,0.0,False,False,True

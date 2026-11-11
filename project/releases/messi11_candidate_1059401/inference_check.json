@@ -1,0 +1,27 @@
+{
+  "passed": true,
+  "checkpoint_sha256": "1aa0e8894cacb3ae424772c69049cc55acc36a49c793af560acd92a9519365d4",
+  "devices": [
+    "cuda:0"
+  ],
+  "observation_shape": [
+    22,
+    784
+  ],
+  "policy_output_shapes": [
+    [
+      22,
+      6
+    ],
+    [
+      22,
+      7
+    ],
+    [
+      22,
+      7
+    ]
+  ],
+  "ppo_updates": 0,
+  "scope": "reset, observation encoding, frozen actor JIT inference only"
+}
